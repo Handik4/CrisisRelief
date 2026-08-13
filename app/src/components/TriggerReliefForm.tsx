@@ -5,65 +5,118 @@ import {
   formatGen,
   readCampaign,
   severityName,
+  shortAddress,
   triggerRelief,
   type Campaign,
 } from "../lib/genlayer";
-import { Alert, Button, Card, Field, Select, Spinner, TextInput } from "./ui";
+import {
+  Alert,
+  Button,
+  Card,
+  Field,
+  SeverityBadge,
+  Select,
+  Spinner,
+  TextInput,
+} from "./ui";
 
 const SAMPLE_URL =
   "https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&eventid=us6000jllz";
+
+/** Mirrors the pipeline the contract runs, so the wait is legible. */
+const STAGES = [
+  "Validating source domain",
+  "Fetching report and building SHA-256 fence",
+  "Validators judging across 15 models",
+  "Applying payout gate and settling",
+];
+
+function ConsensusProgress() {
+  return (
+    <div className="space-y-2 rounded-xl border border-edge bg-void/50 p-4">
+      <div className="flex items-center gap-2 text-[11px] font-bold tracking-[0.14em] text-signal uppercase">
+        <Spinner />
+        Consensus in progress
+      </div>
+      <ul className="mt-2 space-y-1.5">
+        {STAGES.map((stage, i) => (
+          <li
+            key={stage}
+            style={{ animationDelay: `${i * 400}ms` }}
+            className="animate-breathe flex items-center gap-2 text-xs text-slate-400"
+          >
+            <span className="h-1 w-1 rounded-full bg-signal" />
+            {stage}
+          </li>
+        ))}
+      </ul>
+      <p className="pt-1 text-[11px] text-slate-600">
+        Typically one to two minutes. Funds move when the transaction finalizes.
+      </p>
+    </div>
+  );
+}
 
 function Outcome({ campaign }: { campaign: Campaign }) {
   const disbursed = campaign.status === "DISBURSED";
   const passed = campaign.verdict_code === 1;
 
   return (
-    <div className="space-y-3">
+    <div className="animate-rise space-y-3">
       <Alert kind={disbursed ? "success" : "info"}>
-        {disbursed
-          ? `Relief disbursed to ${campaign.relief_address}.`
-          : "Evaluation complete. The gate was not cleared, so the escrow stays locked."}
+        {disbursed ? (
+          <>
+            <span className="font-semibold">Relief disbursed.</span> Escrow sent to{" "}
+            <span className="font-mono text-xs">
+              {shortAddress(campaign.relief_address)}
+            </span>
+            .
+          </>
+        ) : (
+          <>
+            <span className="font-semibold">Gate not cleared.</span> The escrow stays
+            locked and can be retried with stronger evidence.
+          </>
+        )}
       </Alert>
 
-      <div className="rounded-lg border border-slate-800 bg-slate-950/50 p-4">
-        <div className="grid grid-cols-3 gap-4 text-center">
-          <div>
-            <div className="text-[11px] tracking-wide text-slate-500 uppercase">
+      <div className="overflow-hidden rounded-xl border border-edge bg-void/50">
+        <div className="grid grid-cols-3 divide-x divide-edge/70">
+          <div className="px-3 py-4 text-center">
+            <div className="text-[10px] font-bold tracking-[0.12em] text-slate-600 uppercase">
               Verdict
             </div>
             <div
-              className={`mt-1 text-lg font-semibold ${
-                passed ? "text-emerald-300" : "text-rose-300"
-              }`}
+              className={`mt-1.5 text-xl font-bold ${passed ? "text-relief" : "text-critical"}`}
             >
               {passed ? "PASS" : "FAIL"}
             </div>
           </div>
-          <div>
-            <div className="text-[11px] tracking-wide text-slate-500 uppercase">
+          <div className="px-3 py-4 text-center">
+            <div className="text-[10px] font-bold tracking-[0.12em] text-slate-600 uppercase">
               Confidence
             </div>
-            <div className="mt-1 text-lg font-semibold text-slate-100">
+            <div className="mt-1.5 font-mono text-xl font-bold text-slate-100 tabular-nums">
               {formatConfidence(campaign.confidence_bp)}
             </div>
           </div>
-          <div>
-            <div className="text-[11px] tracking-wide text-slate-500 uppercase">
+          <div className="px-3 py-4 text-center">
+            <div className="text-[10px] font-bold tracking-[0.12em] text-slate-600 uppercase">
               Severity
             </div>
-            <div className="mt-1 text-lg font-semibold text-slate-100">
-              {severityName(campaign.reported_severity_rank)}
+            <div className="mt-2">
+              <SeverityBadge level={severityName(campaign.reported_severity_rank)} />
             </div>
           </div>
         </div>
 
         {campaign.reason && (
-          <p className="mt-4 border-t border-slate-800 pt-3 text-sm leading-relaxed text-slate-300">
+          <p className="border-t border-edge/70 px-4 py-3 text-sm leading-relaxed text-slate-300">
             {campaign.reason}
           </p>
         )}
 
-        <p className="mt-3 text-xs text-slate-500">
+        <p className="border-t border-edge/70 px-4 py-2.5 text-[11px] text-slate-600">
           Requires {campaign.severity_threshold} or higher and at least 75% confidence.
         </p>
       </div>
@@ -108,8 +161,9 @@ export function TriggerReliefForm({
 
   return (
     <Card
-      title="Trigger relief"
-      subtitle="Submit a report and let validator consensus decide"
+      title="Trigger Relief"
+      subtitle="Submit evidence and let validator consensus decide"
+      accent="relief"
     >
       <form onSubmit={submit} className="space-y-4">
         <Field label="Campaign">
@@ -133,31 +187,31 @@ export function TriggerReliefForm({
 
         <Field
           label="Evidence URL"
-          hint="Must be https on an allowlisted domain: earthquake.usgs.gov, api.reliefweb.int, news.google.com, rss.nytimes.com"
+          hint="https only, on an allowlisted domain: earthquake.usgs.gov, api.reliefweb.int, news.google.com, rss.nytimes.com"
         >
           <TextInput
             required
             type="url"
             value={newsUrl}
             onChange={(e) => setNewsUrl(e.target.value)}
+            spellCheck={false}
             disabled={busy}
           />
         </Field>
 
         {error && <Alert kind="error">{error}</Alert>}
 
-        <Button type="submit" disabled={busy || selectedId === null}>
+        <Button
+          type="submit"
+          variant="relief"
+          disabled={busy || selectedId === null}
+          className="w-full"
+        >
           {busy && <Spinner />}
           {busy ? "Awaiting consensus..." : "Submit evidence"}
         </Button>
 
-        {busy && (
-          <p className="text-xs text-slate-500">
-            Validators are fetching the report, applying the prompt fence and voting.
-            This usually takes a minute or two.
-          </p>
-        )}
-
+        {busy && <ConsensusProgress />}
         {result && <Outcome campaign={result} />}
       </form>
     </Card>

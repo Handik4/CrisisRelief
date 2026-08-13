@@ -1,1 +1,136 @@
 @import "tailwindcss";
+
+@theme {
+  /* Emergency relief palette: deep charcoal base, signal-colour accents. */
+  --color-void: #07080a;
+  --color-charcoal: #0d0f13;
+  --color-charcoal-soft: #14171d;
+  --color-edge: #232833;
+
+  --color-signal: #22d3ee;
+  --color-relief: #34d399;
+  --color-alert: #fbbf24;
+  --color-critical: #fb7185;
+  --color-gold: #fcd34d;
+
+  --animate-pulse-ring: pulse-ring 2.4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  --animate-breathe: breathe 3.2s ease-in-out infinite;
+  --animate-sweep: sweep 2.6s linear infinite;
+  --animate-rise: rise 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes pulse-ring {
+  0%,
+  100% {
+    opacity: 1;
+    box-shadow: 0 0 0 0 currentColor;
+  }
+  50% {
+    opacity: 0.75;
+    box-shadow: 0 0 0 5px transparent;
+  }
+}
+
+@keyframes breathe {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* Travels along the workflow connector to suggest flow between steps. */
+@keyframes sweep {
+  0% {
+    background-position: -60% 0;
+  }
+  100% {
+    background-position: 160% 0;
+  }
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@layer base {
+  html {
+    color-scheme: dark;
+  }
+
+  body {
+    background-color: var(--color-void);
+    /* Two faint corner washes keep the flat charcoal from reading as dead. */
+    background-image:
+      radial-gradient(
+        ellipse 80% 55% at 12% -8%,
+        color-mix(in oklab, var(--color-signal) 12%, transparent),
+        transparent
+      ),
+      radial-gradient(
+        ellipse 70% 50% at 92% 0%,
+        color-mix(in oklab, var(--color-critical) 9%, transparent),
+        transparent
+      );
+    background-attachment: fixed;
+  }
+
+  ::selection {
+    background: color-mix(in oklab, var(--color-signal) 35%, transparent);
+  }
+}
+
+@layer components {
+  /* Glass surface used by every card and panel. */
+  .glass {
+    background: color-mix(in oklab, var(--color-charcoal) 72%, transparent);
+    backdrop-filter: blur(14px);
+    border: 1px solid var(--color-edge);
+  }
+
+  /* Hairline gradient along the top edge of a card. */
+  .edge-glow::before {
+    content: "";
+    position: absolute;
+    inset-inline: 0;
+    top: 0;
+    height: 1px;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      color-mix(in oklab, var(--color-signal) 55%, transparent),
+      transparent
+    );
+  }
+
+  .flow-line {
+    background-image: linear-gradient(
+      90deg,
+      transparent 0%,
+      color-mix(in oklab, var(--color-signal) 70%, transparent) 50%,
+      transparent 100%
+    );
+    background-size: 60% 100%;
+    background-repeat: no-repeat;
+    animation: var(--animate-sweep);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

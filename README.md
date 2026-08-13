@@ -256,12 +256,33 @@ React 19, Tailwind v4, Vite, `genlayer-js`. It imports
 `deployments/studionet.json`, so it points at the live contract with no
 configuration.
 
-- **Campaigns** lists every campaign with region, crisis type, minimum severity,
-  locked GEN, recipient and donor, plus the consensus verdict, confidence and
-  reasoning once evidence has been submitted.
-- **Create campaign** deposits emergency GEN into escrow.
-- **Trigger relief** submits an evidence URL and renders the verdict, confidence
-  and severity alongside the disbursement outcome.
+- **How CrisisRelief Works** is an interactive four-step pipeline: lock GEN,
+  submit a report, 20-validator AI consensus, instant settlement. Selecting a
+  step expands what the contract actually enforces at that stage, so the
+  explanation stays tied to the code rather than to marketing copy.
+- **Hero stats** show total vault liquidity in GEN, active disasters and
+  campaigns settled, easing between values as the chain state changes.
+- **Relief campaigns** lists every campaign with region, crisis type, minimum
+  severity, locked GEN, recipient and donor, plus the consensus verdict,
+  confidence and reasoning once evidence has been submitted.
+- **Lock emergency funds** deposits GEN into escrow, with staged status
+  feedback while the transaction mines.
+- **Trigger relief** submits an evidence URL, shows the consensus pipeline while
+  validators vote, then renders verdict, confidence and severity alongside the
+  disbursement outcome.
+
+Theme is deep charcoal with glassmorphic panels, neon accent edges and pulsing
+live indicators. Severity ramps from slate through amber and orange to red;
+disbursed campaigns carry a golden badge. All motion respects
+`prefers-reduced-motion`.
+
+One honest gap in the stats: the third counter reports **campaigns settled**
+rather than GEN disbursed. `trigger_relief` zeroes `atto_amount` when it pays
+out, so the historical value of past disbursements is not recoverable from
+chain state. Making that a GEN figure needs a contract change: add a
+`disbursed_atto: u256` field at the **end** of the `Campaign` dataclass (storage
+layout is positional, so appending is the safe position), set it alongside
+`campaign.atto_amount = u256(0)`, expose it from `get_campaign`, then redeploy.
 
 StudioNet is a sandbox, so the dashboard keeps a burner key in `localStorage`
 and tops it up with the faucet button rather than asking for a wallet. Nothing
