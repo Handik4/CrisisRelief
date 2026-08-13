@@ -1,0 +1,29 @@
+# gltest configuration for CrisisRelief.
+#
+# studionet is the default target: it is gasless, so a zero GEN balance is
+# fine and no private keys are needed to run the integration suite.
+#
+#   gltest tests/ -v -s                          # studionet (default)
+#   gltest tests/ -v -s --network localnet       # local GenLayer Studio
+#   gltest tests/ -v -s --network testnet_asimov # needs ACCOUNT_PRIVATE_KEY_*
+
+environment: .env
+
+paths:
+  contracts: contracts/
+  artifacts: artifacts/
+
+networks:
+  default: studionet
+
+  # studio.genlayer.com - gasless, no funding required
+  studionet:
+    leader_only: false
+    default_wait_interval: 3000
+    default_wait_retries: 40
+
+  # GenLayer Studio running locally
+  localnet:
+    leader_only: false
+    default_wait_interval: 2000
+    default_wait_retries: 30
