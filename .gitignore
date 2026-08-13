@@ -7,3 +7,6 @@ artifacts/
 .env
 .DS_Store
 pyrightconfig.json
+node_modules/
+dist/
+*.tsbuildinfo

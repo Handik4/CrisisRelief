@@ -1,0 +1,24 @@
+{
+  "network": "studionet",
+  "chain_id": 61999,
+  "rpc_url": "https://studio.genlayer.com/api",
+  "contract_name": "CrisisRelief",
+  "contract_address": "0xF8DFE446D5D05870680D63350b90960f350b57dF",
+  "deployer": "0x9e72d2018A232639601B1992d590467Df54C4298",
+  "owner": "0x9e72d2018A232639601B1992d590467Df54C4298",
+  "deployment_tx": "0x80a7855e594e47837d433160b884fc8777f5793629d6838b73bb366f6887ad97",
+  "deployed_at": "2026-08-13T18:01:44Z",
+  "allowed_domains": [
+    "earthquake.usgs.gov",
+    "api.reliefweb.int",
+    "news.google.com",
+    "rss.nytimes.com"
+  ],
+  "min_confidence_bp": 7500,
+  "severity_levels": [
+    "MINOR",
+    "MODERATE",
+    "SEVERE",
+    "CATASTROPHIC"
+  ]
+}
