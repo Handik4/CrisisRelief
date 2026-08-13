@@ -3,6 +3,7 @@ import { studionet } from "genlayer-js/chains";
 import { TransactionStatus, type CalldataEncodable } from "genlayer-js/types";
 
 import deployment from "./deployment.json";
+import { getInjectedProvider } from "./wallet";
 
 export const CONTRACT_ADDRESS = deployment.contract_address as `0x${string}`;
 export const CHAIN_ID = deployment.chain_id;
@@ -13,9 +14,8 @@ export const ONE_GEN = 10n ** 18n;
 const STORAGE_KEY = "crisisrelief.privateKey";
 
 /**
- * StudioNet is a sandbox, so the dashboard keeps a burner key in localStorage
- * and tops it up through the faucet rather than asking for a wallet. Nothing
- * here is meant to hold value.
+ * StudioNet is a sandbox, so the dashboard can fall back to a burner key in
+ * localStorage for instant testing. Nothing it holds is meant to have value.
  */
 function loadOrCreatePrivateKey(): `0x${string}` {
   const stored = localStorage.getItem(STORAGE_KEY);
@@ -27,11 +27,53 @@ function loadOrCreatePrivateKey(): `0x${string}` {
   return key;
 }
 
-export const account = createAccount(loadOrCreatePrivateKey());
+export const burnerAccount = createAccount(loadOrCreatePrivateKey());
 
-export const client = createClient({ chain: studionet, account });
+/**
+ * Reads never sign, so they always go straight to the RPC regardless of which
+ * wallet is connected. Keeping a dedicated client means the campaign list still
+ * loads when no wallet is connected at all.
+ */
+const readClient = createClient({ chain: studionet, account: burnerAccount });
 
-export function resetAccount() {
+export type WalletMode = "burner" | "injected";
+
+type ActiveWallet = { mode: WalletMode; address: `0x${string}` };
+
+let activeWallet: ActiveWallet = {
+  mode: "burner",
+  address: burnerAccount.address as `0x${string}`,
+};
+
+/**
+ * genlayer-js decides how to sign from the shape of `account`: an Account
+ * object signs locally, while a bare address delegates eth_sendTransaction to
+ * the injected provider. That is the whole difference between the two modes.
+ */
+export function setActiveWallet(next: ActiveWallet) {
+  activeWallet = next;
+}
+
+export function getActiveWallet(): ActiveWallet {
+  return activeWallet;
+}
+
+function writeClient() {
+  if (activeWallet.mode === "burner") {
+    return createClient({ chain: studionet, account: burnerAccount });
+  }
+  const provider = getInjectedProvider();
+  if (!provider) {
+    throw new Error("Wallet disconnected. Reconnect or switch to the burner wallet.");
+  }
+  return createClient({
+    chain: studionet,
+    account: activeWallet.address,
+    provider,
+  });
+}
+
+export function resetBurnerAccount() {
   localStorage.removeItem(STORAGE_KEY);
   window.location.reload();
 }
@@ -85,7 +127,7 @@ export const SEVERITY_LEVELS = [
 // ---------------------------------------------------------------------------
 
 export async function readTrustModel(): Promise<TrustModel> {
-  return (await client.readContract({
+  return (await readClient.readContract({
     address: CONTRACT_ADDRESS,
     functionName: "get_trust_model",
     args: [],
@@ -93,7 +135,7 @@ export async function readTrustModel(): Promise<TrustModel> {
 }
 
 export async function readCampaignCount(): Promise<number> {
-  const raw = await client.readContract({
+  const raw = await readClient.readContract({
     address: CONTRACT_ADDRESS,
     functionName: "get_campaign_count",
     args: [],
@@ -102,7 +144,7 @@ export async function readCampaignCount(): Promise<number> {
 }
 
 export async function readCampaign(id: number): Promise<Campaign> {
-  return (await client.readContract({
+  return (await readClient.readContract({
     address: CONTRACT_ADDRESS,
     functionName: "get_campaign",
     args: [id],
@@ -121,7 +163,7 @@ export async function readAllCampaigns(): Promise<Campaign[]> {
 }
 
 export async function readBalance(address: string): Promise<bigint> {
-  return await client.getBalance({ address: address as `0x${string}` });
+  return await readClient.getBalance({ address: address as `0x${string}` });
 }
 
 // ---------------------------------------------------------------------------
@@ -133,6 +175,9 @@ async function send(
   args: CalldataEncodable[],
   value: bigint,
 ): Promise<{ hash: string; receipt: unknown }> {
+  // Resolved per call, so a wallet change between transactions is picked up
+  // without any component needing to rebuild a client.
+  const client = writeClient();
   const hash = await client.writeContract({
     address: CONTRACT_ADDRESS,
     functionName,
@@ -177,16 +222,17 @@ export async function triggerRelief(campaignId: number, newsUrl: string) {
 }
 
 /**
- * StudioNet exposes a faucet RPC. It is not in the typed client surface, so
- * call it through the raw provider.
+ * StudioNet exposes a faucet RPC that credits any address, so it works for a
+ * connected MetaMask account just as well as for the burner. It is not in the
+ * typed client surface, so call it through the raw provider.
  */
-export async function fundSelf(amountGen = 100) {
+export async function fundAddress(address: string, amountGen = 100) {
   // The faucet compares the amount numerically server side, so it has to go
   // over the wire as a JSON number rather than a decimal string. Whole GEN
   // amounts stay exactly representable as doubles well past any useful size.
-  await client.request({
+  await readClient.request({
     method: "sim_fundAccount" as never,
-    params: [account.address, amountGen * 1e18] as never,
+    params: [address, amountGen * 1e18] as never,
   });
 }
 

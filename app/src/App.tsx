@@ -5,44 +5,19 @@ import { CreateCampaignForm } from "./components/CreateCampaignForm";
 import { HowItWorks } from "./components/HowItWorks";
 import { StatsBar } from "./components/StatsBar";
 import { TriggerReliefForm } from "./components/TriggerReliefForm";
-import { Alert, Button, LiveDot, Spinner } from "./components/ui";
+import { WalletMenu } from "./components/WalletMenu";
+import { Alert, Button, LiveDot } from "./components/ui";
+import { WalletProvider, useWallet } from "./lib/WalletContext";
 import {
   CHAIN_ID,
   CONTRACT_ADDRESS,
-  account,
-  formatGen,
-  fundSelf,
+  fundAddress,
   readAllCampaigns,
   readBalance,
-  resetAccount,
+  resetBurnerAccount,
   shortAddress,
   type Campaign,
 } from "./lib/genlayer";
-
-function Meta({
-  label,
-  value,
-  mono = true,
-  accent,
-}: {
-  label: string;
-  value: string;
-  mono?: boolean;
-  accent?: string;
-}) {
-  return (
-    <div className="text-right">
-      <div className="text-[10px] font-bold tracking-[0.14em] text-slate-600 uppercase">
-        {label}
-      </div>
-      <div
-        className={`mt-0.5 text-xs ${mono ? "font-mono" : ""} ${accent ?? "text-slate-300"}`}
-      >
-        {value}
-      </div>
-    </div>
-  );
-}
 
 function Header({
   balance,
@@ -57,7 +32,7 @@ function Header({
     <header className="sticky top-0 z-20 border-b border-edge/70 bg-void/80 backdrop-blur-xl">
       <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-5 px-6 py-4">
         <div className="flex items-center gap-3.5">
-          <div className="relative flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-signal/20 to-critical/20 text-xl ring-1 ring-signal/30">
+          <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-signal/20 to-critical/20 text-xl ring-1 ring-signal/30">
             &#9760;
           </div>
           <div>
@@ -71,29 +46,45 @@ function Header({
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-5">
-          <Meta
-            label={`Contract, chain ${CHAIN_ID}`}
-            value={shortAddress(CONTRACT_ADDRESS)}
-            accent="text-signal"
-          />
-          <Meta label="Your burner" value={shortAddress(account.address)} />
-          <Meta
-            label="Balance"
-            value={balance === null ? "..." : `${formatGen(balance)} GEN`}
-            accent="text-slate-100"
-          />
-          <Button variant="ghost" onClick={onFund} disabled={funding}>
-            {funding && <Spinner />}
-            {funding ? "Funding" : "Faucet"}
-          </Button>
+        <div className="flex flex-wrap items-center gap-4">
+          <div className="hidden text-right lg:block">
+            <div className="text-[10px] font-bold tracking-[0.14em] text-slate-600 uppercase">
+              Contract, chain {CHAIN_ID}
+            </div>
+            <div className="mt-0.5 font-mono text-xs text-signal">
+              {shortAddress(CONTRACT_ADDRESS)}
+            </div>
+          </div>
+
+          <WalletMenu balance={balance} onFund={onFund} funding={funding} />
         </div>
       </div>
     </header>
   );
 }
 
-export default function App() {
+/** Full-width warning shown while a connected wallet is on the wrong chain. */
+function NetworkBanner() {
+  const wallet = useWallet();
+  if (!wallet.wrongNetwork) return null;
+
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-critical/30 bg-critical/10 px-4 py-3">
+      <p className="text-sm text-rose-200">
+        <span className="font-semibold">Wrong network.</span> Your wallet is on chain{" "}
+        {wallet.chainId}. CrisisRelief is deployed on StudioNet ({CHAIN_ID}), so
+        transactions will not reach the contract until you switch.
+      </p>
+      <Button onClick={wallet.switchNetwork} disabled={wallet.switching}>
+        {wallet.switching ? "Switching..." : "Switch to StudioNet"}
+      </Button>
+    </div>
+  );
+}
+
+function Dashboard() {
+  const wallet = useWallet();
+
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [balance, setBalance] = useState<bigint | null>(null);
   const [loading, setLoading] = useState(true);
@@ -106,7 +97,7 @@ export default function App() {
     try {
       const [list, bal] = await Promise.all([
         readAllCampaigns(),
-        readBalance(account.address),
+        readBalance(wallet.address),
       ]);
       setCampaigns(list);
       setBalance(bal);
@@ -116,8 +107,10 @@ export default function App() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [wallet.address]);
 
+  // Re-reads whenever the active address changes, so the balance always
+  // belongs to the wallet that would actually sign.
   useEffect(() => {
     void refresh();
   }, [refresh]);
@@ -125,7 +118,7 @@ export default function App() {
   async function handleFund() {
     setFunding(true);
     try {
-      await fundSelf();
+      await fundAddress(wallet.address);
       await new Promise((r) => setTimeout(r, 6000));
       await refresh();
     } catch (err) {
@@ -140,7 +133,9 @@ export default function App() {
       <Header balance={balance} onFund={handleFund} funding={funding} />
 
       <main className="mx-auto max-w-7xl space-y-6 px-6 py-8">
+        {wallet.error && <Alert kind="error">{wallet.error}</Alert>}
         {error && <Alert kind="error">{error}</Alert>}
+        <NetworkBanner />
 
         <HowItWorks />
         <StatsBar campaigns={campaigns} />
@@ -168,14 +163,24 @@ export default function App() {
             Funds release only when validator consensus confirms an allowlisted report
             matches the campaign region, type and severity.
           </span>
-          <button
-            onClick={resetAccount}
-            className="transition hover:text-slate-400"
-          >
-            Reset burner account
-          </button>
+          {wallet.mode === "burner" && (
+            <button
+              onClick={resetBurnerAccount}
+              className="transition hover:text-slate-400"
+            >
+              Reset burner account
+            </button>
+          )}
         </footer>
       </main>
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <WalletProvider>
+      <Dashboard />
+    </WalletProvider>
   );
 }
