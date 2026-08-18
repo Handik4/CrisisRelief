@@ -140,17 +140,21 @@ export function TriggerReliefForm({
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<Campaign | null>(null);
 
-  const active = campaigns.filter((c) => c.status === "ACTIVE");
+  const now = Math.floor(Date.now() / 1000);
+  const active = campaigns.filter(
+    (c) => c.status === "ACTIVE" && now <= c.expiry,
+  );
+  const selectedCampaign = active.find((c) => c.campaign_id === selectedId);
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
-    if (selectedId === null) return;
+    if (!selectedCampaign) return;
     setError(null);
     setResult(null);
     setBusy(true);
     try {
-      await triggerRelief(selectedId, newsUrl);
-      setResult(await readCampaign(selectedId));
+      await triggerRelief(selectedCampaign.campaign_id, newsUrl);
+      setResult(await readCampaign(selectedCampaign.campaign_id));
       onSettled();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -169,7 +173,7 @@ export function TriggerReliefForm({
         <Field label="Campaign">
           <Select
             required
-            value={selectedId ?? ""}
+            value={selectedCampaign?.campaign_id ?? ""}
             onChange={(e) => onSelect(e.target.value ? Number(e.target.value) : null)}
             disabled={busy || active.length === 0}
           >
@@ -204,7 +208,7 @@ export function TriggerReliefForm({
         <Button
           type="submit"
           variant="relief"
-          disabled={busy || selectedId === null}
+          disabled={busy || !selectedCampaign}
           className="w-full"
         >
           {busy && <Spinner />}

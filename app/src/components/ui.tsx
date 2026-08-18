@@ -121,16 +121,21 @@ export function LiveDot({ color = "relief" }: { color?: "relief" | "signal" | "a
 }
 
 export function StatusPill({ status }: { status: string }) {
-  const active = status === "ACTIVE";
+  const tone = {
+    ACTIVE: "bg-alert/10 text-alert ring-alert/30",
+    EVALUATING: "bg-signal/10 text-signal ring-signal/30",
+    DISBURSED: "bg-gold/10 text-gold shadow-[0_0_18px_-4px] shadow-gold/40 ring-gold/40",
+    REFUNDED: "bg-slate-500/10 text-slate-300 ring-slate-500/30",
+  }[status] ?? "bg-slate-500/10 text-slate-300 ring-slate-500/30";
+
   return (
     <span
-      className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-bold tracking-[0.1em] uppercase ${
-        active
-          ? "bg-alert/10 text-alert ring-1 ring-alert/30"
-          : "bg-gold/10 text-gold shadow-[0_0_18px_-4px] shadow-gold/40 ring-1 ring-gold/40"
-      }`}
+      className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-bold tracking-[0.1em] uppercase ring-1 ${tone}`}
     >
-      {active ? <LiveDot color="alert" /> : <span>&#10003;</span>}
+      {status === "ACTIVE" && <LiveDot color="alert" />}
+      {status === "EVALUATING" && <LiveDot color="signal" />}
+      {status === "DISBURSED" && <span>&#10003;</span>}
+      {status === "REFUNDED" && <span>&#8634;</span>}
       {status}
     </span>
   );

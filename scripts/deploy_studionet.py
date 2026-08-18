@@ -29,6 +29,7 @@ FUNDING = 100 * ONE_GEN
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 CONTRACT_PATH = ROOT / "contracts" / "crisis_relief.py"
 OUTPUT_PATH = ROOT / "deployments" / "studionet.json"
+APP_OUTPUT_PATH = ROOT / "app" / "src" / "lib" / "deployment.json"
 
 
 def main() -> int:
@@ -91,11 +92,15 @@ def main() -> int:
         "allowed_domains": trust_model["allowed_domains"],
         "min_confidence_bp": trust_model["min_confidence_bp"],
         "severity_levels": trust_model["severity_levels"],
+        "settlement_window_seconds": trust_model["settlement_window_seconds"],
+        "statuses": trust_model["statuses"],
     }
 
-    OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    OUTPUT_PATH.write_text(json.dumps(record, indent=2) + "\n")
-    print(f"Wrote {OUTPUT_PATH.relative_to(ROOT)}")
+    encoded_record = json.dumps(record, indent=2) + "\n"
+    for output_path in (OUTPUT_PATH, APP_OUTPUT_PATH):
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(encoded_record)
+        print(f"Wrote {output_path.relative_to(ROOT)}")
     return 0
 
 

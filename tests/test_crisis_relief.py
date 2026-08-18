@@ -15,6 +15,9 @@ import pytest
 CONTRACT = "contracts/crisis_relief.py"
 
 ONE_GEN = 10**18
+SETTLEMENT_WINDOW_SECONDS = 30 * 24 * 60 * 60
+CAMPAIGN_START = "2026-01-01T00:00:00Z"
+CAMPAIGN_START_TIMESTAMP = 1767225600
 
 USGS_URL = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.geojson"
 RELIEFWEB_URL = "https://api.reliefweb.int/v1/reports?filter[field]=country"
@@ -105,6 +108,7 @@ def contract(direct_vm, direct_deploy, direct_alice):
 
 
 def test_create_campaign_locks_escrow_and_records_terms(direct_vm, contract):
+    direct_vm.warp(CAMPAIGN_START)
     campaign_id = new_campaign(direct_vm, contract)
     assert campaign_id == 1
 
@@ -117,6 +121,8 @@ def test_create_campaign_locks_escrow_and_records_terms(direct_vm, contract):
     assert record["atto_amount"] == 5 * ONE_GEN
     assert record["relief_address"].lower() == RELIEF_ADDRESS.lower()
     assert record["evidence_url"] == ""
+    assert record["created_at"] == CAMPAIGN_START_TIMESTAMP
+    assert record["expiry"] == CAMPAIGN_START_TIMESTAMP + SETTLEMENT_WINDOW_SECONDS
     assert contract.get_campaign_count() == 1
 
 
@@ -305,6 +311,111 @@ def test_failed_campaign_can_be_retriggered_with_better_evidence(direct_vm, cont
     assert contract.get_campaign(campaign_id)["status"] == "DISBURSED"
 
 
+def test_evaluating_campaign_rejects_another_settlement_action(direct_vm, contract):
+    campaign_id = new_campaign(direct_vm, contract)
+    stored = contract.campaigns[campaign_id]
+    stored.status = "EVALUATING"
+
+    with direct_vm.expect_revert("campaign is not ACTIVE"):
+        contract.trigger_relief(campaign_id, USGS_URL)
+    with direct_vm.expect_revert("campaign is not ACTIVE"):
+        contract.reclaim_funds(campaign_id)
+
+
+# ---------------------------------------------------------------------------
+# Expiry and donor recovery
+# ---------------------------------------------------------------------------
+
+
+def test_donor_cannot_reclaim_before_expiry(direct_vm, contract):
+    direct_vm.warp(CAMPAIGN_START)
+    campaign_id = new_campaign(direct_vm, contract)
+
+    direct_vm.warp("2026-01-30T23:59:59Z")
+    with direct_vm.expect_revert("settlement window is still open"):
+        contract.reclaim_funds(campaign_id)
+
+    record = contract.get_campaign(campaign_id)
+    assert record["status"] == "ACTIVE"
+    assert record["atto_amount"] == 5 * ONE_GEN
+
+
+def test_donor_cannot_reclaim_at_exact_expiry(direct_vm, contract):
+    direct_vm.warp(CAMPAIGN_START)
+    campaign_id = new_campaign(direct_vm, contract)
+
+    direct_vm.warp("2026-01-31T00:00:00Z")
+    with direct_vm.expect_revert("settlement window is still open"):
+        contract.reclaim_funds(campaign_id)
+
+
+def test_only_donor_can_reclaim_expired_campaign(
+    direct_vm, contract, direct_bob
+):
+    direct_vm.warp(CAMPAIGN_START)
+    campaign_id = new_campaign(direct_vm, contract)
+
+    direct_vm.warp("2026-01-31T00:00:01Z")
+    direct_vm.sender = direct_bob
+    with direct_vm.expect_revert("only the donor can reclaim"):
+        contract.reclaim_funds(campaign_id)
+
+    assert contract.get_campaign(campaign_id)["atto_amount"] == 5 * ONE_GEN
+
+
+def test_donor_reclaims_unused_escrow_after_expiry(direct_vm, contract):
+    direct_vm.warp(CAMPAIGN_START)
+    campaign_id = new_campaign(direct_vm, contract)
+
+    direct_vm.warp("2026-01-31T00:00:01Z")
+    assert contract.reclaim_funds(campaign_id) is True
+
+    record = contract.get_campaign(campaign_id)
+    assert record["status"] == "REFUNDED"
+    assert record["atto_amount"] == 0
+
+
+def test_refunded_campaign_cannot_be_reclaimed_or_triggered_again(direct_vm, contract):
+    direct_vm.warp(CAMPAIGN_START)
+    campaign_id = new_campaign(direct_vm, contract)
+    direct_vm.warp("2026-01-31T00:00:01Z")
+    assert contract.reclaim_funds(campaign_id) is True
+
+    with direct_vm.expect_revert("campaign is not ACTIVE"):
+        contract.reclaim_funds(campaign_id)
+    with direct_vm.expect_revert("campaign is not ACTIVE"):
+        contract.trigger_relief(campaign_id, USGS_URL)
+
+
+def test_expired_campaign_rejects_new_payout_evaluation(direct_vm, contract):
+    direct_vm.warp(CAMPAIGN_START)
+    campaign_id = new_campaign(direct_vm, contract)
+    direct_vm.warp("2026-01-31T00:00:01Z")
+
+    with direct_vm.expect_revert("settlement window has ended"):
+        contract.trigger_relief(campaign_id, USGS_URL)
+
+    record = contract.get_campaign(campaign_id)
+    assert record["status"] == "ACTIVE"
+    assert record["atto_amount"] == 5 * ONE_GEN
+
+
+def test_disbursed_campaign_cannot_be_reclaimed_after_expiry(direct_vm, contract):
+    direct_vm.warp(CAMPAIGN_START)
+    campaign_id = new_campaign(direct_vm, contract)
+    mock_evidence(direct_vm, QUAKE_REPORT)
+    mock_judgement(direct_vm)
+
+    direct_vm.warp("2026-01-31T00:00:00Z")
+    assert contract.trigger_relief(campaign_id, USGS_URL) is True
+
+    direct_vm.warp("2026-01-31T00:00:01Z")
+    with direct_vm.expect_revert("campaign is not ACTIVE"):
+        contract.reclaim_funds(campaign_id)
+
+    assert contract.get_campaign(campaign_id)["status"] == "DISBURSED"
+
+
 # ---------------------------------------------------------------------------
 # Integer normalization across the nondet boundary
 # ---------------------------------------------------------------------------
@@ -411,6 +522,8 @@ def test_missing_verdict_field_reverts(direct_vm, contract):
 
     with direct_vm.expect_revert("[LLM_ERROR]"):
         contract.trigger_relief(campaign_id, USGS_URL)
+
+    assert contract.get_campaign(campaign_id)["status"] == "ACTIVE"
 
 
 def test_non_numeric_confidence_reverts(direct_vm, contract):
@@ -531,6 +644,8 @@ def test_http_503_raises_transient_error(direct_vm, contract):
 
     with direct_vm.expect_revert("[TRANSIENT]"):
         contract.trigger_relief(campaign_id, USGS_URL)
+
+    assert contract.get_campaign(campaign_id)["status"] == "ACTIVE"
 
 
 def test_empty_body_raises_external_error(direct_vm, contract):
@@ -655,7 +770,8 @@ def test_get_trust_model_describes_the_verification_rules(contract):
     assert "rss.nytimes.com" in model["allowed_domains"]
     assert model["confidence_scale_bp"] == 10000
     assert model["min_confidence_bp"] == 7500
-    assert model["statuses"] == ["ACTIVE", "DISBURSED"]
+    assert model["settlement_window_seconds"] == SETTLEMENT_WINDOW_SECONDS
+    assert model["statuses"] == ["ACTIVE", "EVALUATING", "DISBURSED", "REFUNDED"]
     assert model["numeric_policy"] == "integers only across the nondet boundary"
 
 

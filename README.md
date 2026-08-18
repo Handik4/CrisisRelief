@@ -4,11 +4,13 @@ An autonomous AI disaster relief vault built as a GenLayer Intelligent Contract,
 with a React dashboard wired to a live StudioNet deployment.
 
 A donor locks GEN into an escrow campaign that names a target region, a crisis
-type, a relief recipient and a minimum severity. Anyone may later submit a news
-or agency report URL. The contract fetches that URL, wraps the untrusted body in
-a SHA-256 derived prompt fence, and asks the validator set to judge whether the
-report confirms a real crisis matching the campaign terms. If the judgement
-clears the gate, the escrowed GEN is released to the relief address.
+type, a relief recipient and a minimum severity. Anyone may submit a news or
+agency report URL during the 30-day settlement window. The contract fetches that
+URL, wraps the untrusted body in a SHA-256 derived prompt fence, and asks the
+validator set to judge whether the report confirms a real crisis matching the
+campaign terms. If the judgement clears the gate, the escrowed GEN is released
+to the relief address. If the window ends without a payout, only the original
+donor can reclaim the unused escrow.
 
 No human approves the payout. The trust boundary is the domain allowlist, the
 prompt fence, and validator consensus over an integer verdict.
@@ -20,30 +22,30 @@ prompt fence, and validator consensus over an integer verdict.
 | Network | StudioNet |
 | Chain ID | `61999` |
 | RPC | `https://studio.genlayer.com/api` |
-| Contract | `0xF8DFE446D5D05870680D63350b90960f350b57dF` |
-| Deploy tx | `0x80a7855e594e47837d433160b884fc8777f5793629d6838b73bb366f6887ad97` |
-| Owner | `0x9e72d2018A232639601B1992d590467Df54C4298` |
+| Contract | `0x792085f0f6422a6fd4c77C8a523A870eAd4Db785` |
+| Deploy tx | `0x21048f06b6c8e4b4fff35e36ebe93142b8084996b84f2e9ecae7cf90b4dbe14f` |
+| Owner | `0x7DA17683aE05D5503032cBc19FFD370D9FD05E62` |
 
 The full record lives in [`deployments/studionet.json`](deployments/studionet.json),
-which the dashboard imports directly, so the UI and the tests always target the
-same address. Redeploy with:
+and the deploy script mirrors it to `app/src/lib/deployment.json`, so the UI and
+the tests always target the same address. Redeploy with:
 
 ```bash
 .venv/bin/python scripts/deploy_studionet.py
 ```
 
 The script generates and funds a deployer, deploys, reads `get_trust_model` back
-off chain to prove the deployment is live, and only then writes the JSON. Set
-`DEPLOYER_PRIVATE_KEY` to keep a stable `owner` across redeployments.
+off chain to prove the deployment is live, and only then writes both JSON files.
+Set `DEPLOYER_PRIVATE_KEY` to keep a stable `owner` across redeployments.
 
 ## Layout
 
 ```
 contracts/crisis_relief.py                the intelligent contract
-tests/test_crisis_relief.py               57 direct-mode tests, web and LLM mocked
+tests/test_crisis_relief.py               65 direct-mode tests, web and LLM mocked
 tests/test_crisis_relief_integration.py   7 integration tests against a live network
 scripts/deploy_studionet.py               deploy and record
-deployments/studionet.json                live address, imported by the app
+deployments/studionet.json                canonical live deployment record
 app/                                      React 19 + Tailwind v4 dashboard
 gltest.config.yaml                        network configuration, studionet default
 pytest.ini                                integration tests opt in via a marker
@@ -54,24 +56,25 @@ pytest.ini                                integration tests opt in via a marker
 ```
       donor                                          anyone
         |                                              |
-        | create_campaign(region, type, relief, sev)   | trigger_relief(id, url)
-        | payable, locks GEN                           |
+       | create_campaign(region, type, relief, sev)   | trigger_relief(id, url)
+       | payable, locks GEN                           | reclaim_funds(id), donor only
         v                                              v
   +-----------------------------------------------------------------+
   |                      CrisisRelief contract                       |
   |                                                                  |
   |  campaigns: TreeMap[u256, Campaign]   campaign_count   owner      |
   |                                                                  |
-  |  1. allowlist check      host must be one of four exact domains  |
-  |  2. bind storage         region/type/threshold/amount -> locals  |
+   |  1. deadline check        evidence accepted through expiry       |
+   |  2. allowlist check       host must be one of four exact domains  |
+   |  3. bind storage          region/type/threshold/amount -> locals  |
   |     +-------------------- nondet boundary ---------------------+ |
-  |  3. | fetch              gl.nondet.web.get, truncate to 12k    | |
-  |  4. | fence              token = sha256(body)[:32]             | |
-  |  5. | judge              gl.nondet.exec_prompt, text mode      | |
-  |  6. | normalize          -> verdict_code, confidence_bp, rank  | |
+   |  4. | fetch              gl.nondet.web.get, truncate to 12k    | |
+   |  5. | fence              token = sha256(body)[:32]             | |
+   |  6. | judge              gl.nondet.exec_prompt, text mode      | |
+   |  7. | normalize          -> verdict_code, confidence_bp, rank  | |
   |     +---------------- integers only cross back ---------------+ |
-  |  7. gate                 contract arithmetic, not the model     |
-  |  8. disburse             emit_transfer on finalization          |
+   |  8. gate                 contract arithmetic, not the model     |
+   |  9. disburse             emit_transfer on finalization          |
   +-----------------------------------------------------------------+
                                     |
                                     v
@@ -84,33 +87,42 @@ pytest.ini                                integration tests opt in via a marker
 |---|---|---|
 | `create_campaign(target_region, crisis_type, relief_address, severity_threshold)` | write, payable | Lock GEN in escrow behind release conditions. Returns the campaign id. |
 | `trigger_relief(campaign_id, news_url)` | write | Evaluate a report and disburse if it clears the gate. Returns whether it paid out. |
+| `reclaim_funds(campaign_id)` | write | After expiry, return unused escrow to the original donor. |
 | `get_campaign(campaign_id)` | view | Full public record of one campaign. |
 | `get_campaign_count()` | view | Number of campaigns created. |
 | `get_trust_model()` | view | The verification rules an integrator can rely on. |
 
 Severity threshold is one of `MINOR`, `MODERATE`, `SEVERE`, `CATASTROPHIC`.
-Campaign status is `ACTIVE` or `DISBURSED`.
+Campaign status is `ACTIVE`, `EVALUATING`, `DISBURSED` or `REFUNDED`. The
+settlement window is 2,592,000 seconds (30 days). Payout is allowed at the exact
+expiry timestamp; reclaim is allowed only after it.
 
 ### How a payout is decided
 
-1. **Domain allowlist.** `news_url` must be `https` and its host must be exactly
+1. **Settlement window.** A report can be evaluated only while the campaign is
+   `ACTIVE` and the transaction timestamp is at or before `expiry`. The campaign
+   changes to `EVALUATING` during consensus, then returns to `ACTIVE` for a
+   failed judgement or becomes `DISBURSED` for a passing one.
+2. **Domain allowlist.** `news_url` must be `https` and its host must be exactly
    one of `earthquake.usgs.gov`, `api.reliefweb.int`, `news.google.com`,
    `rss.nytimes.com`. This runs before any nondeterministic work.
-2. **Fetch.** The body is retrieved with `gl.nondet.web.get` and truncated to
+3. **Fetch.** The body is retrieved with `gl.nondet.web.get` and truncated to
    12,000 characters. HTTP failures are classified as `[EXTERNAL]` (4xx,
    deterministic) or `[TRANSIENT]` (5xx, retryable).
-3. **Prompt fence.** See below.
-4. **Judgement.** Validators reach consensus through `gl.vm.run_nondet_unsafe`
+4. **Prompt fence.** See below.
+5. **Judgement.** Validators reach consensus through `gl.vm.run_nondet_unsafe`
    with a custom validator function.
-5. **Deterministic gate.** The model's answer is normalized to integers, then
+6. **Deterministic gate.** The model's answer is normalized to integers, then
    the contract applies the arithmetic: verdict must be `PASS`, confidence at
    least 7,500 basis points, and reported severity rank at least the campaign
    threshold.
-6. **Disbursement.** Status flips to `DISBURSED` and the escrow is sent to the
-   relief address via `emit_transfer`.
+7. **Disbursement.** Status flips to `DISBURSED` and the escrow is zeroed before
+   it is sent to the relief address via `emit_transfer`.
 
 A failed evaluation leaves the campaign `ACTIVE` and the funds locked, so a
 later report can be submitted. A disbursed campaign cannot be triggered again.
+After expiry, the donor can call `reclaim_funds`; it changes the status to
+`REFUNDED`, zeroes the escrow before emitting the refund, and cannot be replayed.
 
 ## Security design
 
@@ -142,6 +154,21 @@ The LLM never authorizes a transfer. It returns a verdict, a confidence and a
 severity label; the payout condition is plain integer arithmetic in contract
 code. A model that returns `PASS` with 60% confidence, or `PASS` at `SEVERE`
 against a `CATASTROPHIC` campaign, does not move funds.
+
+### Expiry and donor recovery
+
+Campaign creation records deterministic transaction time as `created_at` and
+sets `expiry = created_at + 2,592,000`. Every validator sees the same pinned
+transaction timestamp, so the deadline arithmetic is reproducible. The boundary
+is intentional: `trigger_relief` accepts `current_time <= expiry`, while
+`reclaim_funds` requires `current_time > expiry`.
+
+Both settlement paths require `ACTIVE`. A payout or refund sets its terminal
+status and zeroes `atto_amount` before calling `emit_transfer`, so it cannot be
+replayed. GenLayer queues writes in contract-specific order and commits each
+transaction atomically; a payout and a refund therefore cannot both settle from
+the same active state. `EVALUATING` guards the consensus execution path inside
+the transaction, while failed evaluations restore `ACTIVE`.
 
 ### Integers only across the nondet boundary
 
@@ -188,7 +215,7 @@ differently, which is why nothing text-shaped is ever compared.
 
 ## Test coverage
 
-### Direct mode, 57 tests, offline, ~1s
+### Direct mode, 65 tests, offline, ~2s
 
 ```bash
 .venv/bin/python -m pytest tests/ -v
@@ -204,6 +231,7 @@ differently, which is why nothing text-shaped is ever compared.
 | SHA-256 prompt fencing, including an injected close marker | 3 |
 | Web failure classification: 4xx, 5xx, empty body | 3 |
 | Consensus validator function via the `run_validator` cheatcode | 6 |
+| Expiry, evaluation lock and donor recovery | 8 |
 
 Direct mode runs the leader only and native value transfer is a no-op there,
 which is what the integration suite exists to cover.
@@ -252,9 +280,9 @@ npm install
 npm run dev
 ```
 
-React 19, Tailwind v4, Vite, `genlayer-js`. It imports
-`deployments/studionet.json`, so it points at the live contract with no
-configuration.
+React 19, Tailwind v4, Vite, `genlayer-js`. It imports the deployment record
+mirrored to `app/src/lib/deployment.json`, so it points at the live contract
+without runtime configuration.
 
 - **How CrisisRelief Works** is an interactive four-step pipeline: lock GEN,
   submit a report, 20-validator AI consensus, instant settlement. Selecting a
@@ -270,6 +298,8 @@ configuration.
 - **Trigger relief** submits an evidence URL, shows the consensus pipeline while
   validators vote, then renders verdict, confidence and severity alongside the
   disbursement outcome.
+- **Reclaim GEN** appears for the original donor after an active campaign's
+  settlement window expires and returns the unused escrow.
 
 Theme is deep charcoal with glassmorphic panels, neon accent edges and pulsing
 live indicators. Severity ramps from slate through amber and orange to red;
@@ -290,8 +320,8 @@ it holds is meant to have value.
 
 Writes wait for `FINALIZED` rather than `ACCEPTED`, because `emit_transfer` is
 an external message that only executes once the triggering transaction
-finalizes. The campaign will read `DISBURSED` slightly before the GEN actually
-lands at the relief address.
+finalizes. A campaign can read `DISBURSED` or `REFUNDED` slightly before the GEN
+actually lands at its destination.
 
 ## Development
 

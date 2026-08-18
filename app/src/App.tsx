@@ -12,6 +12,7 @@ import {
   CHAIN_ID,
   CONTRACT_ADDRESS,
   fundAddress,
+  reclaimFunds,
   readAllCampaigns,
   readBalance,
   resetBurnerAccount,
@@ -90,6 +91,7 @@ function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [funding, setFunding] = useState(false);
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [reclaimingId, setReclaimingId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
@@ -128,6 +130,19 @@ function Dashboard() {
     }
   }
 
+  async function handleReclaim(campaignId: number) {
+    setReclaimingId(campaignId);
+    setError(null);
+    try {
+      await reclaimFunds(campaignId);
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setReclaimingId(null);
+    }
+  }
+
   return (
     <div className="min-h-screen text-slate-200">
       <Header balance={balance} onFund={handleFund} funding={funding} />
@@ -145,6 +160,9 @@ function Dashboard() {
             campaigns={campaigns}
             loading={loading}
             onSelect={setSelectedId}
+            walletAddress={wallet.address}
+            reclaimingId={reclaimingId}
+            onReclaim={handleReclaim}
           />
 
           <div className="space-y-6">

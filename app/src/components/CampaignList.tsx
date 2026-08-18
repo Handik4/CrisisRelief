@@ -75,11 +75,19 @@ export function CampaignList({
   campaigns,
   loading,
   onSelect,
+  walletAddress,
+  reclaimingId,
+  onReclaim,
 }: {
   campaigns: Campaign[];
   loading: boolean;
   onSelect: (id: number) => void;
+  walletAddress: string;
+  reclaimingId: number | null;
+  onReclaim: (id: number) => void;
 }) {
+  const now = Math.floor(Date.now() / 1000);
+
   return (
     <Card
       title="Relief Campaigns"
@@ -112,12 +120,18 @@ export function CampaignList({
       )}
 
       <ul className="space-y-3">
-        {campaigns.map((campaign, index) => (
-          <li
-            key={campaign.campaign_id}
-            style={{ animationDelay: `${Math.min(index, 6) * 60}ms` }}
-            className="animate-rise group rounded-xl border border-edge bg-charcoal-soft/40 p-4 transition-all duration-300 hover:-translate-y-0.5 hover:border-slate-700 hover:bg-charcoal-soft/70"
-          >
+        {campaigns.map((campaign, index) => {
+          const expired = now > campaign.expiry;
+          const donor = campaign.donor.toLowerCase() === walletAddress.toLowerCase();
+          const reclaimable = campaign.status === "ACTIVE" && expired && donor;
+          const evidenceOpen = campaign.status === "ACTIVE" && !expired;
+
+          return (
+            <li
+              key={campaign.campaign_id}
+              style={{ animationDelay: `${Math.min(index, 6) * 60}ms` }}
+              className="animate-rise group rounded-xl border border-edge bg-charcoal-soft/40 p-4 transition-all duration-300 hover:-translate-y-0.5 hover:border-slate-700 hover:bg-charcoal-soft/70"
+            >
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
@@ -136,7 +150,7 @@ export function CampaignList({
 
               <div className="flex shrink-0 items-center gap-3">
                 <StatusPill status={campaign.status} />
-                {campaign.status === "ACTIVE" && (
+                {evidenceOpen && (
                   <Button
                     variant="ghost"
                     className="px-3 py-1.5 text-xs"
@@ -145,10 +159,22 @@ export function CampaignList({
                     Submit evidence
                   </Button>
                 )}
+                {reclaimable && (
+                  <Button
+                    variant="ghost"
+                    className="px-3 py-1.5 text-xs"
+                    disabled={reclaimingId === campaign.campaign_id}
+                    onClick={() => onReclaim(campaign.campaign_id)}
+                  >
+                    {reclaimingId === campaign.campaign_id
+                      ? "Reclaiming..."
+                      : "Reclaim GEN"}
+                  </Button>
+                )}
               </div>
             </div>
 
-            <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-4">
+            <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-5">
               <Metric label="Locked">
                 <span className="font-mono font-semibold text-signal">
                   {formatGen(campaign.atto_amount)}
@@ -166,11 +192,17 @@ export function CampaignList({
                   {shortAddress(campaign.donor)}
                 </span>
               </Metric>
+              <Metric label="Settlement window">
+                {campaign.status === "ACTIVE" && expired
+                  ? "Expired"
+                  : new Date(campaign.expiry * 1000).toLocaleDateString()}
+              </Metric>
             </div>
 
             <ConsensusPanel campaign={campaign} />
-          </li>
-        ))}
+            </li>
+          );
+        })}
       </ul>
     </Card>
   );

@@ -16,6 +16,7 @@ state is bound to local variables before any nondet block runs.
 import json
 import hashlib
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
 from genlayer import *
 
@@ -25,7 +26,13 @@ from genlayer import *
 # --------------------------------------------------------------------------
 
 STATUS_ACTIVE = "ACTIVE"
+STATUS_EVALUATING = "EVALUATING"
 STATUS_DISBURSED = "DISBURSED"
+STATUS_REFUNDED = "REFUNDED"
+
+# A campaign accepts evidence through its expiry timestamp. If no report clears
+# the gate, the original donor may recover the unused escrow after that point.
+SETTLEMENT_WINDOW_SECONDS = 30 * 24 * 60 * 60
 
 # Only these hosts may be used as evidence sources. Matching is exact on the
 # host, or on a dot-suffix so that "earthquake.usgs.gov" also permits nothing
@@ -93,6 +100,8 @@ class Campaign:
     confidence_bp: u256
     reported_severity_rank: u256
     reason: str
+    created_at: u256
+    expiry: u256
 
 
 # --------------------------------------------------------------------------
@@ -382,6 +391,7 @@ class CrisisRelief(gl.Contract):
         except Exception:
             raise gl.vm.UserError(ERROR_EXPECTED + " relief_address is not an address")
 
+        created_at = int(datetime.now(timezone.utc).timestamp())
         campaign_id = u256(self.campaign_count + 1)
         self.campaign_count = campaign_id
         self.campaigns[campaign_id] = Campaign(
@@ -398,6 +408,8 @@ class CrisisRelief(gl.Contract):
             confidence_bp=u256(0),
             reported_severity_rank=u256(0),
             reason="",
+            created_at=u256(created_at),
+            expiry=u256(created_at + SETTLEMENT_WINDOW_SECONDS),
         )
         return campaign_id
 
@@ -417,6 +429,9 @@ class CrisisRelief(gl.Contract):
             raise gl.vm.UserError(
                 ERROR_EXPECTED + " campaign is not ACTIVE, it is " + campaign.status
             )
+        current_time = int(datetime.now(timezone.utc).timestamp())
+        if current_time > int(campaign.expiry):
+            raise gl.vm.UserError(ERROR_EXPECTED + " settlement window has ended")
 
         url = news_url.strip()
         host = _extract_host(url)
@@ -435,13 +450,18 @@ class CrisisRelief(gl.Contract):
         payout_amount = u256(campaign.atto_amount)
         payout_address = Address(campaign.relief_address.as_bytes)
 
-        result = self._evaluate_report(
-            local_url,
-            local_region,
-            local_crisis,
-            local_threshold,
-            local_required_rank,
-        )
+        campaign.status = STATUS_EVALUATING
+        try:
+            result = self._evaluate_report(
+                local_url,
+                local_region,
+                local_crisis,
+                local_threshold,
+                local_required_rank,
+            )
+        except gl.vm.UserError:
+            campaign.status = STATUS_ACTIVE
+            raise
 
         verdict_code = int(result["verdict_code"])
         confidence_bp = int(result["confidence_bp"])
@@ -456,11 +476,37 @@ class CrisisRelief(gl.Contract):
 
         passed = _decide(result, local_required_rank)
         if not passed:
+            campaign.status = STATUS_ACTIVE
             return False
 
         campaign.status = STATUS_DISBURSED
         campaign.atto_amount = u256(0)
         _ReliefRecipient(payout_address).emit_transfer(value=payout_amount)
+        return True
+
+    @gl.public.write
+    def reclaim_funds(self, campaign_id: u256) -> bool:
+        """Return unused escrow to its donor after the settlement window."""
+        if campaign_id not in self.campaigns:
+            raise gl.vm.UserError(ERROR_EXPECTED + " unknown campaign")
+
+        campaign = self.campaigns[campaign_id]
+        if campaign.status != STATUS_ACTIVE:
+            raise gl.vm.UserError(
+                ERROR_EXPECTED + " campaign is not ACTIVE, it is " + campaign.status
+            )
+        if gl.message.sender_address != campaign.donor:
+            raise gl.vm.UserError(ERROR_EXPECTED + " only the donor can reclaim")
+
+        current_time = int(datetime.now(timezone.utc).timestamp())
+        if current_time <= int(campaign.expiry):
+            raise gl.vm.UserError(ERROR_EXPECTED + " settlement window is still open")
+
+        refund_amount = u256(campaign.atto_amount)
+        donor = Address(campaign.donor.as_bytes)
+        campaign.status = STATUS_REFUNDED
+        campaign.atto_amount = u256(0)
+        _ReliefRecipient(donor).emit_transfer(value=refund_amount)
         return True
 
     # -------------------------------------------------------------- nondet
@@ -586,6 +632,8 @@ class CrisisRelief(gl.Contract):
             "confidence_bp": int(campaign.confidence_bp),
             "reported_severity_rank": int(campaign.reported_severity_rank),
             "reason": str(campaign.reason),
+            "created_at": int(campaign.created_at),
+            "expiry": int(campaign.expiry),
         }
 
     @gl.public.view
@@ -613,6 +661,12 @@ class CrisisRelief(gl.Contract):
             "llm_response_mode": "text, parsed in-contract to keep floats local",
             "equivalence_principle": "run_nondet_unsafe with a custom validator",
             "numeric_policy": "integers only across the nondet boundary",
-            "statuses": [STATUS_ACTIVE, STATUS_DISBURSED],
+            "settlement_window_seconds": SETTLEMENT_WINDOW_SECONDS,
+            "statuses": [
+                STATUS_ACTIVE,
+                STATUS_EVALUATING,
+                STATUS_DISBURSED,
+                STATUS_REFUNDED,
+            ],
             "owner": self.owner.as_hex,
         }

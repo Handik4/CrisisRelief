@@ -34,6 +34,7 @@ pytestmark = pytest.mark.integration
 
 ONE_GEN = 10**18
 ESCROW = 2 * ONE_GEN
+SETTLEMENT_WINDOW_SECONDS = 30 * 24 * 60 * 60
 
 # A permanent USGS record of the 2023 M7.8 Pazarcik event in the Kahramanmaras
 # sequence: red PAGER alert, reviewed status. Unlike the rolling summary feeds
@@ -115,6 +116,8 @@ def test_contract_deploys_and_reports_its_trust_model(contract):
         "rss.nytimes.com",
     ]
     assert model["min_confidence_bp"] == 7500
+    assert model["settlement_window_seconds"] == SETTLEMENT_WINDOW_SECONDS
+    assert model["statuses"] == ["ACTIVE", "EVALUATING", "DISBURSED", "REFUNDED"]
     assert model["numeric_policy"] == "integers only across the nondet boundary"
 
 
@@ -138,6 +141,7 @@ def test_create_campaign_moves_gen_into_contract_escrow(contract, client):
     assert record["atto_amount"] == ESCROW
     assert record["target_region"] == "Sindh, Pakistan"
     assert record["relief_address"].lower() == recipient.lower()
+    assert record["expiry"] - record["created_at"] == SETTLEMENT_WINDOW_SECONDS
 
 
 # ---------------------------------------------------------------------------

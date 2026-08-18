@@ -82,7 +82,7 @@ export function resetBurnerAccount() {
 // Domain types
 // ---------------------------------------------------------------------------
 
-export type CampaignStatus = "ACTIVE" | "DISBURSED";
+export type CampaignStatus = "ACTIVE" | "EVALUATING" | "DISBURSED" | "REFUNDED";
 
 export type Campaign = {
   campaign_id: number;
@@ -99,6 +99,8 @@ export type Campaign = {
   confidence_bp: number;
   reported_severity_rank: number;
   reason: string;
+  created_at: number;
+  expiry: number;
 };
 
 export type TrustModel = {
@@ -111,6 +113,7 @@ export type TrustModel = {
   confidence_tolerance_bp: number;
   prompt_fencing: string;
   numeric_policy: string;
+  settlement_window_seconds: number;
   statuses: string[];
   owner: string;
 };
@@ -219,6 +222,10 @@ export async function createCampaign(params: {
 
 export async function triggerRelief(campaignId: number, newsUrl: string) {
   return send("trigger_relief", [campaignId, newsUrl], 0n);
+}
+
+export async function reclaimFunds(campaignId: number) {
+  return send("reclaim_funds", [campaignId], 0n);
 }
 
 /**

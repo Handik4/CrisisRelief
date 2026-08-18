@@ -3,11 +3,11 @@
   "chain_id": 61999,
   "rpc_url": "https://studio.genlayer.com/api",
   "contract_name": "CrisisRelief",
-  "contract_address": "0xF8DFE446D5D05870680D63350b90960f350b57dF",
-  "deployer": "0x9e72d2018A232639601B1992d590467Df54C4298",
-  "owner": "0x9e72d2018A232639601B1992d590467Df54C4298",
-  "deployment_tx": "0x80a7855e594e47837d433160b884fc8777f5793629d6838b73bb366f6887ad97",
-  "deployed_at": "2026-08-13T18:01:44Z",
+  "contract_address": "0x792085f0f6422a6fd4c77C8a523A870eAd4Db785",
+  "deployer": "0x7DA17683aE05D5503032cBc19FFD370D9FD05E62",
+  "owner": "0x7DA17683aE05D5503032cBc19FFD370D9FD05E62",
+  "deployment_tx": "0x21048f06b6c8e4b4fff35e36ebe93142b8084996b84f2e9ecae7cf90b4dbe14f",
+  "deployed_at": "2026-08-18T06:22:05Z",
   "allowed_domains": [
     "earthquake.usgs.gov",
     "api.reliefweb.int",
@@ -20,5 +20,12 @@
     "MODERATE",
     "SEVERE",
     "CATASTROPHIC"
+  ],
+  "settlement_window_seconds": 2592000,
+  "statuses": [
+    "ACTIVE",
+    "EVALUATING",
+    "DISBURSED",
+    "REFUNDED"
   ]
 }

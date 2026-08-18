@@ -84,10 +84,14 @@ function Stat({
 }
 
 export function StatsBar({ campaigns }: { campaigns: Campaign[] }) {
-  const active = campaigns.filter((c) => c.status === "ACTIVE");
+  const now = Math.floor(Date.now() / 1000);
+  const escrowed = campaigns.filter(
+    (c) => c.status === "ACTIVE" || c.status === "EVALUATING",
+  );
+  const active = escrowed.filter((c) => now <= c.expiry);
   const settled = campaigns.filter((c) => c.status === "DISBURSED");
 
-  const lockedAtto = active.reduce((sum, c) => sum + BigInt(c.atto_amount), 0n);
+  const lockedAtto = escrowed.reduce((sum, c) => sum + BigInt(c.atto_amount), 0n);
   const liquidity = useCountUp(Number(formatGen(lockedAtto, 4)) || 0);
   const activeCount = useCountUp(active.length);
   const settledCount = useCountUp(settled.length);
